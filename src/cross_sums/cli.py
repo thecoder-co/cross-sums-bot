@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from .computer_use import AutomationOptions, run
+from .computer_use import AutomationOptions, run, run_android
 from .model import Puzzle
 from .solver import solve_unique
 from .vision import read_screenshot
@@ -23,7 +23,7 @@ def _solution_payload(puzzle: Puzzle) -> dict[str, object]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cross-sums",
-        description="Solve Cross Sums with backtracking or automate Offline Games on macOS.",
+        description="Solve Cross Sums with backtracking or automate Offline Games on macOS or Android.",
     )
     parser.add_argument('--version', action='version', version='cross-sums 0.2.0 (fixed-glyph reader)')
     commands = parser.add_subparsers(dest="command", required=True)
@@ -47,6 +47,30 @@ def build_parser() -> argparse.ArgumentParser:
     play.add_argument("--dry-run", action="store_true", help="read and solve once; never click")
     play.add_argument("--max-levels", type=int)
     play.add_argument("--debug-dir", type=Path)
+
+    android = commands.add_parser(
+        "android", help="find and solve boards on an Android device through ADB"
+    )
+    android.add_argument(
+        "--device", dest="device_serial", help="ADB serial when more than one device is connected"
+    )
+    android.add_argument("--adb", type=Path, help="path to the adb executable")
+    android.add_argument(
+        "--package",
+        default="com.JindoBlu.OfflineGames",
+        help="foreground Android package to validate",
+    )
+    android.add_argument("--wait", type=float, default=15.0, help="seconds between boards")
+    android.add_argument("--click-pause", type=float, default=0.08)
+    android.add_argument(
+        "--mode",
+        choices=("keep-only", "keep-and-erase"),
+        default="keep-only",
+        help="click retained cells only, or explicitly process every cell",
+    )
+    android.add_argument("--dry-run", action="store_true", help="read and solve once; never tap")
+    android.add_argument("--max-levels", type=int)
+    android.add_argument("--debug-dir", type=Path)
     return parser
 
 
@@ -59,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         elif arguments.command == "scan":
             detected = read_screenshot(None, arguments.image)
             print(json.dumps(_solution_payload(detected.puzzle), indent=2))
-        else:
+        elif arguments.command == "play":
             run(
                 AutomationOptions(
                     window_query=arguments.window,
@@ -70,6 +94,20 @@ def main(argv: list[str] | None = None) -> int:
                     max_levels=arguments.max_levels,
                     debug_directory=arguments.debug_dir,
                 )
+            )
+        else:
+            run_android(
+                AutomationOptions(
+                    wait_seconds=arguments.wait,
+                    click_pause=arguments.click_pause,
+                    mode=arguments.mode,
+                    dry_run=arguments.dry_run,
+                    max_levels=arguments.max_levels,
+                    debug_directory=arguments.debug_dir,
+                ),
+                device_serial=arguments.device_serial,
+                adb_path=arguments.adb,
+                package_name=arguments.package,
             )
     except KeyboardInterrupt:
         print("Stopped.", file=sys.stderr)

@@ -1,10 +1,12 @@
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image, ImageDraw
 
+from cross_sums.adb import AndroidTarget
 from cross_sums import computer_use
 from cross_sums.computer_use import AutomationOptions
-from cross_sums.geometry import BoardReadError
+from cross_sums.geometry import BoardGeometry, BoardReadError
 from cross_sums.native import NativeBridgeError
 
 
@@ -34,6 +36,93 @@ def detected_board(puzzle):
 
 def game_window():
     return SimpleNamespace(id=7, width=100, height=150, x=20, y=30, pid=99)
+
+
+def test_screen_point_maps_android_coordinates_without_desktop_origin():
+    detected = detected_board(object())
+    target = AndroidTarget("phone", 100, 150, "phone")
+
+    assert computer_use._screen_point(detected, target, (12, 34)) == (12, 34)
+
+
+def android_tool_fixture(selected="eraser"):
+    image = Image.new("RGB", (400, 600), (16, 16, 25))
+    geometry = BoardGeometry(100, 50, 40, 40, 5, 5)
+    draw = ImageDraw.Draw(image)
+    y = 480
+    for name, x in (("eraser", 158), ("pencil", 200)):
+        fill = (66, 65, 82) if name == selected else (25, 24, 33)
+        draw.ellipse((x - 32, y - 32, x + 32, y + 32), fill=fill, outline=(0, 0, 0), width=4)
+    return image, geometry
+
+
+def test_android_tool_is_located_from_visible_controls():
+    image, geometry = android_tool_fixture()
+
+    point = computer_use._android_tool_point(image, geometry, "pencil")
+
+    assert point == pytest.approx((200, 480), abs=2)
+    assert computer_use._android_selected_tool(image, geometry) == "eraser"
+
+
+def test_android_tool_selection_is_verified_before_return(monkeypatch, tmp_path):
+    image, geometry = android_tool_fixture()
+    target = AndroidTarget("phone", 400, 600, "phone")
+    detected = SimpleNamespace(geometry=geometry, image_width=400, image_height=600)
+    clicks = []
+    state = {"selected": "eraser"}
+
+    def capture(_target, destination):
+        current, _ = android_tool_fixture(state["selected"])
+        current.save(destination)
+
+    def click(x, y):
+        clicks.append((x, y))
+        state["selected"] = "pencil"
+
+    bridge = SimpleNamespace(capture_window=capture, click=click)
+    monkeypatch.setattr(computer_use.time, "sleep", lambda _seconds: None)
+
+    computer_use._select_tool(
+        bridge,
+        target,
+        detected,
+        "pencil",
+        settle_seconds=0,
+    )
+
+    assert clicks == [pytest.approx((200, 480), abs=2)]
+
+
+def test_android_aborts_before_cells_if_tool_stays_wrong(monkeypatch, tmp_path):
+    image, geometry = android_tool_fixture()
+    target = AndroidTarget("phone", 400, 600, "phone")
+    detected = SimpleNamespace(geometry=geometry, image_width=400, image_height=600)
+    clicks = []
+
+    def capture(_target, destination):
+        image.save(destination)
+
+    bridge = SimpleNamespace(
+        activate=lambda _pid: None,
+        capture_window=capture,
+        click=lambda x, y: clicks.append((x, y)),
+    )
+    monkeypatch.setattr(computer_use.time, "sleep", lambda _seconds: None)
+    solution = SimpleNamespace(selected_cells=lambda: ((0, 0),))
+
+    with pytest.raises(RuntimeError, match="did not select the pencil"):
+        computer_use.apply_solution(
+            bridge,
+            target,
+            detected,
+            solution,
+            mode="keep-only",
+            click_pause=0,
+        )
+
+    assert len(clicks) == 2
+    assert all(y > 400 for _x, y in clicks)
 
 
 def fake_bridge(window):

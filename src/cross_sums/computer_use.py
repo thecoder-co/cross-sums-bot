@@ -5,9 +5,11 @@ import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import median
 
 from PIL import Image
 
+from .adb import ADBBridge, AndroidTarget
 from .model import Solution
 from .native import MacOSBridge, NativeBridgeError, Window, temporary_png
 from .solver import solve_unique, verify_solution
@@ -31,11 +33,157 @@ def _screen_point(
     window: Window,
     point: tuple[float, float],
 ) -> tuple[float, float]:
-    """Convert a screenshot-pixel point to global macOS point coordinates."""
+    """Convert a screenshot point into the active bridge's input coordinates."""
 
     scale_x = window.width / detected.image_width
     scale_y = window.height / detected.image_height
+    if isinstance(window, AndroidTarget):
+        # Android's input tap coordinates start at the full-screen origin; the
+        # screenshot and target dimensions are kept in the same pixel space by
+        # ADBBridge.capture_window.
+        return point[0] * scale_x, point[1] * scale_y
     return window.x + point[0] * scale_x, window.y + point[1] * scale_y
+
+
+def _android_tool_y(image: Image.Image, geometry) -> float:
+    """Find the Android tool-toggle row from its dark control backgrounds."""
+
+    pencil_x = geometry.pencil_center()[0]
+    eraser_x = geometry.eraser_center()[0]
+    padding = geometry.cell_width * 0.9
+    x_start = max(0, round(min(pencil_x, eraser_x) - padding))
+    x_end = min(image.width, round(max(pencil_x, eraser_x) + padding))
+    y_start = max(0, round(geometry.bottom + geometry.cell_height * 0.2))
+    y_end = min(
+        image.height,
+        round(image.height - geometry.cell_height * 0.2),
+    )
+    if x_start >= x_end or y_start >= y_end:
+        raise RuntimeError("Could not search for the Android tool toggle")
+
+    pixels = image.load()
+    scores: list[tuple[int, int]] = []
+    for y in range(y_start, y_end):
+        score = 0
+        for x in range(x_start, x_end):
+            red, green, blue = pixels[x, y]
+            luminance = (red + green + blue) / 3
+            # Offline Games' selected and unselected controls are both neutral
+            # dark fills; the surrounding background is darker than this band.
+            if (
+                20 <= luminance <= 105
+                and max(red, green, blue) - min(red, green, blue) <= 35
+            ):
+                score += 1
+        scores.append((score, y))
+
+    best = max(score for score, _ in scores)
+    if best < 20:
+        raise RuntimeError("Could not locate the Android tool toggle")
+    active_rows = [y for score, y in scores if score >= best * 0.85]
+    return float(median(active_rows))
+
+
+def _android_tool_point(
+    image: Image.Image,
+    geometry,
+    tool: str,
+) -> tuple[float, float]:
+    if tool == "pencil":
+        x = geometry.pencil_center()[0]
+    elif tool == "eraser":
+        x = geometry.eraser_center()[0]
+    else:
+        raise ValueError(f"unsupported Android tool: {tool}")
+    return x, _android_tool_y(image, geometry)
+
+
+def _android_tool_luminance(
+    image: Image.Image,
+    center: tuple[float, float],
+    radius: float,
+) -> float:
+    pixels = image.load()
+    x_center, y_center = center
+    inner = radius * 0.42
+    outer = radius * 0.65
+    values: list[float] = []
+    for y in range(
+        max(0, round(y_center - outer)),
+        min(image.height, round(y_center + outer + 1)),
+    ):
+        for x in range(
+            max(0, round(x_center - outer)),
+            min(image.width, round(x_center + outer + 1)),
+        ):
+            distance = ((x - x_center) ** 2 + (y - y_center) ** 2) ** 0.5
+            if inner <= distance <= outer:
+                red, green, blue = pixels[x, y]
+                values.append((red + green + blue) / 3)
+    if not values:
+        raise RuntimeError("Could not sample the Android tool toggle")
+    return sum(values) / len(values)
+
+
+def _android_selected_tool(image: Image.Image, geometry) -> str:
+    y = _android_tool_y(image, geometry)
+    radius = geometry.cell_width
+    eraser = _android_tool_luminance(
+        image, (geometry.eraser_center()[0], y), radius
+    )
+    pencil = _android_tool_luminance(
+        image, (geometry.pencil_center()[0], y), radius
+    )
+    if abs(eraser - pencil) < 8:
+        raise RuntimeError("Could not verify which Android tool is selected")
+    return "eraser" if eraser > pencil else "pencil"
+
+
+def _select_tool(
+    bridge,
+    window,
+    detected: DetectedPuzzle,
+    tool: str,
+    *,
+    settle_seconds: float,
+) -> None:
+    """Select a tool and verify it visually before any cell clicks."""
+
+    if tool not in {"pencil", "eraser"}:
+        raise ValueError(f"unsupported tool: {tool}")
+
+    if not isinstance(window, AndroidTarget):
+        point = (
+            detected.geometry.pencil_center()
+            if tool == "pencil"
+            else detected.geometry.eraser_center()
+        )
+        bridge.click(*_screen_point(detected, window, point))
+        time.sleep(settle_seconds)
+        return
+
+    screenshot = temporary_png()
+    try:
+        for attempt in range(3):
+            bridge.capture_window(window, screenshot)
+            with Image.open(screenshot) as source:
+                image = source.convert("RGB")
+            if _android_selected_tool(image, detected.geometry) == tool:
+                return
+            if attempt == 2:
+                raise RuntimeError(
+                    f"Android did not select the {tool} tool after two retries"
+                )
+            bridge.click(
+                *_screen_point(
+                    detected,
+                    window,
+                    _android_tool_point(image, detected.geometry, tool),
+                )
+            )
+            time.sleep(settle_seconds)
+    finally:
+        screenshot.unlink(missing_ok=True)
 
 
 def _click_cells(
@@ -98,9 +246,13 @@ def apply_solution(
     bridge.activate(window.pid)
     time.sleep(0.35)
 
-    # Select the pencil/circle tool, located directly below the board center.
-    bridge.click(*_screen_point(detected, window, detected.geometry.pencil_center()))
-    time.sleep(0.12)
+    _select_tool(
+        bridge,
+        window,
+        detected,
+        "pencil",
+        settle_seconds=max(0.12, click_pause * 2),
+    )
     _click_cells(
         bridge,
         window,
@@ -110,8 +262,13 @@ def apply_solution(
     )
 
     if mode == "keep-and-erase":
-        bridge.click(*_screen_point(detected, window, detected.geometry.eraser_center()))
-        time.sleep(0.12)
+        _select_tool(
+            bridge,
+            window,
+            detected,
+            "eraser",
+            settle_seconds=max(0.12, click_pause * 2),
+        )
         _click_cells(
             bridge,
             window,
@@ -166,13 +323,13 @@ def _verify_marks(
                 flush=True,
             )
             bridge.activate(current.pid)
-            time.sleep(0.35)
-            bridge.click(
-                *_screen_point(
-                    detected, current, detected.geometry.pencil_center()
-                )
+            _select_tool(
+                bridge,
+                current,
+                detected,
+                "pencil",
+                settle_seconds=max(0.12, options.click_pause * 2),
             )
-            time.sleep(0.12)
             _click_cells(
                 bridge,
                 current,
@@ -232,12 +389,34 @@ def _read_next_board(bridge, options, screenshot, last_puzzle):
 
 
 def run(options: AutomationOptions) -> None:
+    _run_loop(options, MacOSBridge())
+
+
+def run_android(
+    options: AutomationOptions,
+    *,
+    device_serial: str | None = None,
+    adb_path: str | Path | None = None,
+    package_name: str = "com.JindoBlu.OfflineGames",
+) -> None:
+    """Solve boards on a connected Android device through ADB."""
+
+    _run_loop(
+        options,
+        ADBBridge(
+            serial=device_serial,
+            executable=adb_path,
+            package_name=package_name,
+        ),
+    )
+
+
+def _run_loop(options: AutomationOptions, bridge) -> None:
     if options.wait_seconds < 0 or options.click_pause < 0:
         raise ValueError("wait and click-pause must not be negative")
     if options.max_levels is not None and options.max_levels < 1:
         raise ValueError("max-levels must be at least 1")
     print("cross-sums 0.2.0: fixed-glyph reader (no Vision OCR)", flush=True)
-    bridge = MacOSBridge()
     level = 0
     last_puzzle = None
     while options.max_levels is None or level < options.max_levels:

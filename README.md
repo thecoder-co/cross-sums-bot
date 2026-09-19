@@ -8,16 +8,17 @@ A small `uv` Python project with two deliberately separate parts:
    that window, finds the grid directly from its cell backgrounds, reads each
    digit using bundled font templates, runs the solver, and clicks the retained cells.
 
-The computer-use path refuses to click if the board is incomplete, a clue is
-impossible, no solution exists, or more than one solution exists.
+The computer-use paths refuse to click if the board is incomplete, a clue is
+impossible, no solution exists, or more than one solution exists. The Android
+path uses ADB screenshots and taps, so it works without macOS Screen Recording
+or Accessibility permissions.
 
 ## Requirements
 
-- macOS
 - [`uv`](https://docs.astral.sh/uv/)
-- Xcode Command Line Tools (`swiftc`) for the tiny native bridge
-- Screen Recording permission to capture the game
-- Accessibility permission to click the game
+- macOS, Xcode Command Line Tools (`swiftc`), Screen Recording permission, and
+  Accessibility permission for the desktop `play` command
+- Android platform-tools (`adb`) and USB debugging for the `android` command
 
 The native bridge uses Core Graphics and AppKit for window control and clicks.
 It is compiled automatically on first use. Screenshot reading uses Pillow alone;
@@ -104,7 +105,32 @@ Useful controls:
 --window "Offline Games"  change the window/app-name match
 ```
 
-The old Vision-specific `--confidence` option has been removed.
+## Android / ADB computer use
+
+Connect an Android device with USB debugging enabled, open Cross Sums in
+Offline Games, and leave the full board visible. The Android command reads the
+device screenshot, solves the board, and derives every tap from the detected
+board geometry. It locates the tool toggle in each screenshot and verifies the
+requested tool is selected before tapping cells. It does not assume a
+1080×2340 screen, Android density, or a particular aspect ratio; screenshot
+dimensions and tool position are refreshed for each board.
+
+Start with a read-only pass:
+
+```bash
+uv run cross-sums android --dry-run --debug-dir work/android
+```
+
+Then enable taps:
+
+```bash
+uv run cross-sums android --max-levels 1
+```
+
+If more than one device is connected, select one with `--device SERIAL`. Use
+`--adb /path/to/adb` when `adb` is not on `PATH`, and `--package PACKAGE` when
+the installed game uses a different package name. `--click-pause` defaults to
+0.08 seconds on Android to allow the Unity input queue to settle.
 
 The game window may move or resize between boards: every iteration finds it
 again and converts screenshot pixels back to macOS screen coordinates. Brief
@@ -114,7 +140,10 @@ macOS window-server capture failures are retried twice before the run stops.
 
 ```json
 {
-  "grid": [[1, 2], [3, 4]],
+  "grid": [
+    [1, 2],
+    [3, 4]
+  ],
   "row_targets": [1, 4],
   "column_targets": [1, 4]
 }
