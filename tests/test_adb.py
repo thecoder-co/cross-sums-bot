@@ -32,6 +32,45 @@ def test_android_taps_use_the_latest_screenshot_dimensions(monkeypatch, tmp_path
     assert target.width == 1080
 
 
+def test_android_long_press_uses_a_stationary_swipe(monkeypatch):
+    bridge = ADBBridge.__new__(ADBBridge)
+    bridge.executable = Path("/usr/bin/adb")
+    bridge.serial = "phone"
+    bridge.package_name = "com.JindoBlu.OfflineGames"
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("cross_sums.adb.subprocess.run", run)
+    bridge.long_press(470.6, 1759.4, duration_ms=600)
+    assert commands == [
+        (
+            [
+                "/usr/bin/adb",
+                "-s",
+                "phone",
+                "shell",
+                "input",
+                "swipe",
+                "471",
+                "1759",
+                "471",
+                "1759",
+                "600",
+            ],
+            {"capture_output": True, "text": True, "check": False},
+        )
+    ]
+
+
+def test_android_long_press_rejects_non_positive_duration() -> None:
+    bridge = ADBBridge.__new__(ADBBridge)
+    with pytest.raises(ValueError, match="must be positive"):
+        bridge.long_press(100, 200, duration_ms=0)
+
+
 def test_find_window_rejects_multiple_devices(monkeypatch):
     bridge = ADBBridge.__new__(ADBBridge)
     bridge.executable = Path("/usr/bin/adb")
@@ -44,6 +83,17 @@ def test_find_window_rejects_multiple_devices(monkeypatch):
         lambda *args, **kwargs: "List of devices attached\nfirst\tdevice\nsecond\tdevice\n",
     )
     with pytest.raises(NativeBridgeError, match="Multiple Android devices"):
+        bridge.find_window("Offline Games")
+
+
+def test_find_window_fails_closed_when_foreground_package_is_unknown(monkeypatch):
+    bridge = ADBBridge.__new__(ADBBridge)
+    bridge.executable = Path("/usr/bin/adb")
+    bridge.serial = "phone"
+    bridge.package_name = "com.JindoBlu.OfflineGames"
+    monkeypatch.setattr(bridge, "_connected_serials", lambda: ["phone"])
+    monkeypatch.setattr(bridge, "_foreground_package", lambda: None)
+    with pytest.raises(NativeBridgeError, match="Could not verify"):
         bridge.find_window("Offline Games")
 
 

@@ -119,6 +119,27 @@ class MacOSBridge:
                 + result.stderr.strip()
             )
 
+    def long_press(self, x: float, y: float, duration_ms: int = 600) -> None:
+        if duration_ms <= 0:
+            raise ValueError("Long-press duration must be positive")
+        result = subprocess.run(
+            [
+                str(self.executable),
+                "long-press",
+                str(x),
+                str(y),
+                str(duration_ms),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode:
+            raise NativeBridgeError(
+                "Long press failed. Allow Accessibility control for your terminal or Codex. "
+                + result.stderr.strip()
+            )
+
     def activate(self, pid: int) -> None:
         result = subprocess.run(
             [str(self.executable), "activate", str(pid)],

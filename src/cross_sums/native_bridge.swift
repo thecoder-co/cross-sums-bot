@@ -74,6 +74,22 @@ func click(x: Double, y: Double) {
     up.post(tap: .cghidEventTap)
 }
 
+func longPress(x: Double, y: Double, durationMilliseconds: UInt32) {
+    guard AXIsProcessTrusted() else {
+        fail("Accessibility permission is required to control the game")
+    }
+    let point = CGPoint(x: x, y: y)
+    guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                            mouseCursorPosition: point, mouseButton: .left),
+          let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+                          mouseCursorPosition: point, mouseButton: .left) else {
+        fail("Unable to create a mouse event")
+    }
+    down.post(tap: .cghidEventTap)
+    usleep(durationMilliseconds * 1_000)
+    up.post(tap: .cghidEventTap)
+}
+
 func activate(pid: Int32) {
     guard NSRunningApplication(processIdentifier: pid) != nil else {
         fail("The game process is no longer running")
@@ -92,7 +108,7 @@ func activate(pid: Int32) {
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 guard let command = arguments.first else {
-    fail("Expected command: find-window, activate, or click")
+    fail("Expected command: find-window, activate, click, or long-press")
 }
 do {
     switch command {
@@ -105,6 +121,15 @@ do {
             fail("click requires numeric x and y coordinates")
         }
         click(x: x, y: y)
+    case "long-press":
+        guard arguments.count == 4,
+              let x = Double(arguments[1]),
+              let y = Double(arguments[2]),
+              let duration = UInt32(arguments[3]),
+              duration > 0 else {
+            fail("long-press requires numeric x, y, and positive duration milliseconds")
+        }
+        longPress(x: x, y: y, durationMilliseconds: duration)
     case "activate":
         guard arguments.count == 2, let pid = Int32(arguments[1]) else {
             fail("activate requires a numeric process id")

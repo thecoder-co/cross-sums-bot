@@ -20,7 +20,7 @@ from .vision import BoardReadError, DetectedPuzzle, read_screenshot
 @dataclass(frozen=True, slots=True)
 class AutomationOptions:
     window_query: str = "Offline Games"
-    wait_seconds: float = 18.0
+    wait_seconds: float = 15.0
     click_pause: float = 0.005
     mode: str = "keep-only"
     dry_run: bool = False

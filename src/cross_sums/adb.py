@@ -153,10 +153,15 @@ class ADBBridge:
 
         self._connected_serials()
         foreground = self._foreground_package()
-        if self.package_name and foreground and foreground != self.package_name:
-            raise NativeBridgeError(
-                f"Expected {self.package_name} in the foreground, found {foreground}"
-            )
+        if self.package_name:
+            if foreground is None:
+                raise NativeBridgeError(
+                    "Could not verify the foreground Android package; no taps will be sent"
+                )
+            if foreground != self.package_name:
+                raise NativeBridgeError(
+                    f"Expected {self.package_name} in the foreground, found {foreground}"
+                )
         width, height = self._display_size()
         return AndroidTarget(
             id=self.serial or "android",
@@ -182,6 +187,22 @@ class ADBBridge:
 
     def click(self, x: float, y: float) -> None:
         self._run("shell", "input", "tap", round(x), round(y))
+
+    def long_press(self, x: float, y: float, duration_ms: int = 600) -> None:
+        if duration_ms <= 0:
+            raise ValueError("Long-press duration must be positive")
+        rounded_x = round(x)
+        rounded_y = round(y)
+        self._run(
+            "shell",
+            "input",
+            "swipe",
+            rounded_x,
+            rounded_y,
+            rounded_x,
+            rounded_y,
+            duration_ms,
+        )
 
     def activate(self, _pid: int) -> None:
         # ADB input is device-global; unlike a desktop window it does not need

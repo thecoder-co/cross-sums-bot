@@ -36,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     play = commands.add_parser("play", help="find the game and solve boards in a loop")
     play.add_argument("--window", default="Offline Games", help="window title or app name")
-    play.add_argument("--wait", type=float, default=18.0, help="seconds between boards")
+    play.add_argument("--wait", type=float, default=15.0, help="seconds between boards")
     play.add_argument("--click-pause", type=float, default=0.005)
     play.add_argument(
         "--mode",

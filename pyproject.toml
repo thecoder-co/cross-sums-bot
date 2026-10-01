@@ -1,13 +1,17 @@
 [project]
 name = "cross-sums-bot"
 version = "0.2.0"
-description = "A backtracking solver and macOS screen automation for Offline Games Cross Sums"
+description = "Screenshot-driven solvers and automation for Offline Games logic puzzles"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["pillow>=11.3"]
+dependencies = [
+    "ortools>=9.15.6755",
+    "pillow>=11.3",
+]
 
 [project.scripts]
 cross-sums = "cross_sums.cli:main"
+meowdoku = "meowdoku.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8.3"]
@@ -17,7 +21,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cross_sums"]
+packages = ["src/cross_sums", "src/meowdoku", "src/puzzle_automation"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

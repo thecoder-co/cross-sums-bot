@@ -1,12 +1,12 @@
-# Cross Sums Bot
+# Offline Games Puzzle Solvers
 
-A small `uv` Python project with two deliberately separate parts:
+A `uv` Python project with two screenshot-driven solvers:
 
-1. **Backtracking** turns a number grid and its row/column clues into the unique
-   boolean cell-selection mask.
-2. **Computer use** finds the **Offline Games** window on macOS, captures only
-   that window, finds the grid directly from its cell backgrounds, reads each
-   digit using bundled font templates, runs the solver, and clicks the retained cells.
+1. **Cross Sums** uses custom backtracking and fixed digit templates.
+2. **Meowdoku** uses an OR-Tools CP-SAT model for row, column, color-region,
+   known-cat, known-empty, and non-touching constraints.
+
+Both games support screenshot scanning, macOS computer use, and Android ADB.
 
 The computer-use paths refuse to click if the board is incomplete, a clue is
 impossible, no solution exists, or more than one solution exists. The Android
@@ -22,7 +22,86 @@ or Accessibility permissions.
 
 The native bridge uses Core Graphics and AppKit for window control and clicks.
 It is compiled automatically on first use. Screenshot reading uses Pillow alone;
-`scan` and `solve` also work without macOS or Swift.
+`scan` and `solve` also work without macOS or Swift. Meowdoku's deterministic
+constraint model additionally requires OR-Tools.
+
+## Meowdoku
+
+Meowdoku is represented as a square region matrix plus any marks already shown
+by the game:
+
+```json
+{
+  "regions": [
+    ["yellow", "yellow", "green", "green"],
+    ["yellow", "blue", "blue", "green"],
+    ["red", "blue", "purple", "purple"],
+    ["red", "red", "purple", "purple"]
+  ],
+  "known_cats": [],
+  "known_empty": []
+}
+```
+
+The CP-SAT model enforces exactly one cat per row, column, and color region,
+plus the rule that cats cannot touch diagonally. It can solve the board, prove
+whether a cell must be a cat or empty, and produce a named deduction that is
+independently verified by the constraint model:
+
+```bash
+uv run meowdoku solve examples/meowdoku-level-2.json
+uv run meowdoku classify examples/meowdoku-level-2.json 1 8
+uv run meowdoku hint examples/meowdoku-level-2.json
+uv run meowdoku scan screenshot.png
+```
+
+`classify` uses one-based row and column arguments. Its result is one of
+`must_be_cat`, `must_be_empty`, `undetermined`, or
+`current_board_is_contradictory`.
+
+### Meowdoku computer use
+
+Open Meowdoku inside **Offline Games** and keep the full board visible. Begin
+with the read-only desktop command:
+
+```bash
+uv run meowdoku play --dry-run --debug-dir work/meowdoku
+```
+
+After inspecting its JSON result, solve one live board with:
+
+```bash
+uv run meowdoku play --max-levels 1 --debug-dir work/meowdoku
+```
+
+The reader locates the colored grid, recognizes color regions, existing cats,
+and the game's automatic X marks. Before any input, the board must have a unique
+CP-SAT solution. The automation long-presses each missing solution cell,
+recaptures the board after every cat, and stops if the target, board, or observed
+marks differ from the verified solution. It then captures again after the cat
+animation settles, so a short-lived rejected-cat animation cannot authorize the
+next input. The default hold is 1.5 seconds; use `--press-duration SECONDS` to
+increase it for a device that needs a longer press.
+
+For Android, Offline Games remains the host app; the default foreground package
+is `com.JindoBlu.OfflineGames`:
+
+```bash
+uv run meowdoku android --dry-run --debug-dir work/meowdoku-android
+uv run meowdoku android --max-levels 1 --debug-dir work/meowdoku-android
+```
+
+Use `--device SERIAL` when multiple devices are attached, `--adb /path/to/adb`
+for a nonstandard platform-tools install, and `--package PACKAGE` only for a
+different Offline Games build. Grid coordinates are derived from every current
+screenshot; no display size, density, or cell coordinate is hardcoded.
+
+The first release deliberately keeps probabilistic move selection out of the
+correctness boundary. A strategy model such as Jev can later rank already
+generated hints, but every displayed or automated move must still be proved by
+CP-SAT.
+
+## Cross Sums
 
 ## Reader strategy (version 0.2.0)
 

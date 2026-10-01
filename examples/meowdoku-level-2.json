@@ -1,0 +1,14 @@
+{
+  "regions": [
+    ["magenta", "magenta", "magenta", "magenta", "magenta", "magenta", "magenta", "green"],
+    ["magenta", "magenta", "magenta", "magenta", "magenta", "magenta", "blue", "green"],
+    ["yellow", "magenta", "magenta", "magenta", "magenta", "magenta", "blue", "green"],
+    ["yellow", "magenta", "cyan", "magenta", "magenta", "magenta", "blue", "orange"],
+    ["yellow", "magenta", "cyan", "magenta", "emerald", "magenta", "blue", "orange"],
+    ["yellow", "yellow", "yellow", "magenta", "emerald", "orange", "orange", "orange"],
+    ["yellow", "yellow", "purple", "orange", "orange", "orange", "orange", "orange"],
+    ["yellow", "purple", "purple", "orange", "orange", "orange", "orange", "orange"]
+  ],
+  "known_cats": [],
+  "known_empty": []
+}
